@@ -11,8 +11,6 @@ Modes: pulse, strobe, breathe, bass_hit, vu_meter
 __version__ = "1.0.0"
 
 import argparse
-import ctypes
-import ctypes.util
 import math
 import signal
 import struct
@@ -56,84 +54,38 @@ BANNER = r"""
 
 
 class KeyboardBacklight:
-    """Direct IOKit control of MacBook keyboard backlight — no sudo needed."""
+    """CoreBrightness control of MacBook keyboard backlight — no sudo needed."""
 
     def __init__(self):
-        self._connect = None
-        self._iokit = None
-        self._cf = None
+        self._client = None
+        self._kb_id = None
         self._brightness = 0.0
+        self._original_brightness = 0.5
         self._available = False
-        self._init_iokit()
+        self._init_backlight()
 
-    def _init_iokit(self):
+    def _init_backlight(self):
         try:
-            iokit_path = ctypes.util.find_library("IOKit")
-            cf_path = ctypes.util.find_library("CoreFoundation")
-            if not iokit_path or not cf_path:
-                return
-            self._iokit = ctypes.cdll.LoadLibrary(iokit_path)
-            self._cf = ctypes.cdll.LoadLibrary(cf_path)
+            import objc
+            from Foundation import NSBundle
 
-            # IOServiceGetMatchingService
-            self._iokit.IOServiceGetMatchingService.restype = ctypes.c_uint
-            self._iokit.IOServiceGetMatchingService.argtypes = [
-                ctypes.c_uint,
-                ctypes.c_void_p,
-            ]
-
-            # IOServiceMatching
-            self._iokit.IOServiceMatching.restype = ctypes.c_void_p
-            self._iokit.IOServiceMatching.argtypes = [ctypes.c_char_p]
-
-            # IOServiceOpen
-            self._iokit.IOServiceOpen.restype = ctypes.c_uint
-            self._iokit.IOServiceOpen.argtypes = [
-                ctypes.c_uint,
-                ctypes.c_uint,
-                ctypes.c_uint,
-                ctypes.POINTER(ctypes.c_uint),
-            ]
-
-            # IOConnectCallScalarMethod
-            self._iokit.IOConnectCallScalarMethod.restype = ctypes.c_uint
-            self._iokit.IOConnectCallScalarMethod.argtypes = [
-                ctypes.c_uint,
-                ctypes.c_uint,
-                ctypes.POINTER(ctypes.c_uint64),
-                ctypes.c_uint,
-                ctypes.POINTER(ctypes.c_uint64),
-                ctypes.POINTER(ctypes.c_uint),
-            ]
-
-            # Get the LuxDisplay service
-            service = self._iokit.IOServiceGetMatchingService(
-                0,  # kIOMainPortDefault
-                self._iokit.IOServiceMatching(b"AppleLMUController"),
+            bundle = NSBundle.bundleWithPath_(
+                "/System/Library/PrivateFrameworks/CoreBrightness.framework"
             )
-            if not service:
-                # Try alternative service name
-                service = self._iokit.IOServiceGetMatchingService(
-                    0,
-                    self._iokit.IOServiceMatching(b"AppleHIDKeyboardEventDriverV2"),
-                )
-            if not service:
+            if not bundle or not bundle.load():
                 return
 
-            connect = ctypes.c_uint()
-            result = self._iokit.IOServiceOpen(service, self._get_task(), 0, ctypes.byref(connect))
-            if result == 0:
-                self._connect = connect.value
+            KBClient = objc.lookUpClass("KeyboardBrightnessClient")
+            self._client = KBClient.alloc().init()
+
+            kb_ids = self._client.copyKeyboardBacklightIDs()
+            if kb_ids and len(kb_ids) > 0:
+                self._kb_id = kb_ids[0]
+                self._original_brightness = self._client.brightnessForKeyboard_(self._kb_id)
+                self._brightness = self._original_brightness
                 self._available = True
         except Exception:
             self._available = False
-
-    @staticmethod
-    def _get_task():
-        """Get current mach task port."""
-        libc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("c"))
-        libc.mach_task_self.restype = ctypes.c_uint
-        return libc.mach_task_self()
 
     @property
     def available(self):
@@ -146,13 +98,7 @@ class KeyboardBacklight:
             self._brightness = level
             return
         try:
-            raw = int(level * 0xFFF)
-            inp = (ctypes.c_uint64 * 2)(0, raw)
-            out = (ctypes.c_uint64 * 1)()
-            out_cnt = ctypes.c_uint(1)
-            self._iokit.IOConnectCallScalarMethod(
-                self._connect, 2, inp, 2, out, ctypes.byref(out_cnt)
-            )
+            self._client.setBrightness_forKeyboard_(level, self._kb_id)
             self._brightness = level
         except Exception:
             pass
@@ -161,9 +107,9 @@ class KeyboardBacklight:
         return self._brightness
 
     def cleanup(self):
-        """Restore backlight to reasonable default."""
-        if self._available and self._connect is not None:
-            self.set_brightness(0.5)
+        """Restore backlight to original brightness."""
+        if self._available and self._client is not None:
+            self.set_brightness(self._original_brightness)
 
 
 # ---------------------------------------------------------------------------
