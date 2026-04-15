@@ -143,6 +143,14 @@ To change settings later, edit `/tmp/kbpulse.applescript`, recompile with `osaco
 - PortAudio (`brew install portaudio`)
 - `pyaudio`, `numpy`, `pyobjc-core`, `pyobjc-framework-Cocoa`
 
+### Tested on
+
+- **MacBook Air M1 (MacBookAir10,1)** — macOS Sequoia, Python 3.9 (Xcode), BlackHole 2ch via Multi-Output
+
+### Apple Silicon note
+
+On Apple Silicon, if you launch via a Cocoa app bundle (as in the auto-start recipe above), Launch Services may start `python3` under Rosetta (x86_64), which fails to load arm64-compiled `numpy`. The wrapper uses `/usr/bin/arch -arm64 /usr/bin/python3 ...` to pin the interpreter to native arm64 — keep that prefix if you customise the applet.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
