@@ -23,6 +23,8 @@ classifiers = [
 dependencies = [
     "pyaudio>=0.2.13",
     "numpy>=1.24",
+    "pyobjc-core>=9.2",
+    "pyobjc-framework-Cocoa>=9.2",
 ]
 
 [project.scripts]

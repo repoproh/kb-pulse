@@ -33,7 +33,7 @@ pip install .
 ### Or just run it directly
 
 ```bash
-pip install pyaudio numpy
+pip install pyaudio numpy pyobjc-core pyobjc-framework-Cocoa
 python3 kb_pulse.py
 ```
 
@@ -103,12 +103,45 @@ To sync to your system audio (Spotify, Ableton, browser, etc.):
                     └──────────────┘
 ```
 
+## Auto-start at login
+
+A plain LaunchAgent **will not work**: macOS classifies any audio input capture (including virtual devices like BlackHole) as microphone access, and processes spawned by `launchd` have no app identity to request that permission against — they just read silence.
+
+The fix is to wrap `kb_pulse.py` in a proper Cocoa app bundle (so TCC can grant the bundle mic permission) and register that as a login item.
+
+```bash
+# 1. Write a one-line AppleScript that launches the script in the background.
+cat > /tmp/kbpulse.applescript <<'EOF'
+do shell script "/usr/bin/arch -arm64 /usr/bin/python3 /ABSOLUTE/PATH/TO/kb_pulse.py --mode strobe --device 2 --sensitivity 1.0 >/tmp/kbpulse.log 2>&1 &"
+EOF
+
+# 2. Compile it into an .app bundle (a real Cocoa applet with NSMicrophoneUsageDescription).
+osacompile -o ~/Applications/KBPulse.app /tmp/kbpulse.applescript
+
+# 3. Mark it as a background agent (no Dock icon) and give it a stable bundle id.
+/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" ~/Applications/KBPulse.app/Contents/Info.plist
+/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.kbpulse.app" ~/Applications/KBPulse.app/Contents/Info.plist
+
+# 4. Ad-hoc codesign for a stable TCC identity.
+codesign --force --deep --sign - ~/Applications/KBPulse.app
+
+# 5. Launch once — macOS will show a microphone permission dialog. Click Allow.
+open ~/Applications/KBPulse.app
+
+# 6. Add to login items so it auto-starts.
+osascript -e 'tell application "System Events" to make login item at end with properties {path:"'"$HOME"'/Applications/KBPulse.app", hidden:true}'
+```
+
+Replace `/ABSOLUTE/PATH/TO/kb_pulse.py` with the real path, and `--device 2` with your BlackHole index (check `kb-pulse --list-devices`). Change mode/sensitivity to taste.
+
+To change settings later, edit `/tmp/kbpulse.applescript`, recompile with `osacompile -x -o /tmp/kbpulse.scpt` and copy the result into `~/Applications/KBPulse.app/Contents/Resources/Scripts/main.scpt`, then re-sign — this preserves your mic permission grant.
+
 ## Requirements
 
-- macOS (keyboard backlight control uses IOKit)
+- macOS (keyboard backlight control uses CoreBrightness via pyobjc)
 - Python 3.9+
 - PortAudio (`brew install portaudio`)
-- PyAudio + NumPy
+- `pyaudio`, `numpy`, `pyobjc-core`, `pyobjc-framework-Cocoa`
 
 ## License
 
